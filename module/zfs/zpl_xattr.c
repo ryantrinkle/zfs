@@ -77,9 +77,14 @@
  * largely avoids the issue except in the overflow case.
  */
 
+#include <linux/key.h>
+#include <linux/keyctl.h>
+#include <linux/key-type.h>
+#include <keys/user-type.h>
 #include <sys/zfs_vfsops.h>
 #include <sys/zfs_vnops.h>
 #include <sys/zfs_znode.h>
+#include <sys/xvattr.h>
 #include <sys/zap.h>
 #include <sys/vfs.h>
 #include <sys/zpl.h>
@@ -1408,6 +1413,469 @@ xattr_handler_t zpl_xattr_acl_default_handler =
 
 #endif /* CONFIG_FS_POSIX_ACL */
 
+#ifdef CONFIG_FS_NFS4_ACL
+
+static const struct cred *nfs4acl_resolver_cred;
+
+#define NFS4ACL_XATTR "system.nfs4_acl"
+#define NFS4ACL_NAMESZ  128
+#define NFS4ACL_UINT_MAXLEN 11
+#define NFS4ACL_XDR_MOD 4
+
+/* XXX The functions in security/keys/user_defined.c are marked GPL-only; these are
+   logically equivilent but not copied, any issues with that? */
+int
+nfs4acl_key_preparse(struct key_preparsed_payload *kpp)
+{
+	struct user_key_payload *ukp;
+	size_t dl = kpp->datalen;
+
+	if (!kpp->data || dl < 1 || dl > 32767)
+		return -EINVAL;
+
+	ukp = kmalloc(dl + sizeof(*ukp), GFP_KERNEL);
+	if (!ukp)
+		return -ENOMEM;
+
+	ukp->datalen = dl;
+	kpp->quotalen = dl;
+	kpp->payload.data[0] = ukp;
+	memcpy(ukp->data, kpp->data, dl);
+	return 0;
+}
+
+void
+nfs4acl_key_free_preparse(struct key_preparsed_payload *kpp)
+{
+	kfree(kpp->payload.data[0]);
+}
+
+void
+nfs4acl_key_destroy(struct key *k)
+{
+	struct user_key_payload *ukp = k->payload.data[0];
+
+	kfree(ukp);
+}
+
+void
+nfs4acl_key_describe(const struct key *k, struct seq_file *sf)
+{
+	seq_puts(sf, k->description);
+	if (key_is_positive(k))
+		seq_printf(sf, ": %u", k->datalen);
+}
+
+long
+nfs4acl_key_read(const struct key *k, char __user *ub, size_t ublen)
+{
+	const struct user_key_payload *ukp;
+	long ret;
+
+	/* XXX function user_key_payload in older kernels,
+	       need to wrap this to do the right thing based on version */
+	ukp = user_key_payload_rcu(k);
+	ret = ukp->datalen;
+
+	if (ub && ublen > 0) {
+		if (ublen > ukp->datalen)
+			ublen = ukp->datalen;
+
+		if (copy_to_user(ub, ukp->data, ublen) != 0)
+			ret = -EFAULT;
+	}
+
+	return ret;
+}
+
+/* Use the existing nfs4 userspace resolver mechanism, but instantiate it
+   under a different name to avoid a conflict with nfs. This will require a new
+   line in /etc/request-key.conf or a new file in /etc/request-key.d containing:
+
+   create  zfs_nfs4acl_resolver    *       *       /usr/sbin/nfsidmap -t 600 %k %d
+
+   It would be better to have a native kernel interface to NFS4 ACLs to avoid
+   dealing with uid/gid mappings in-kernel and the unnecessary local use of the
+   NFS4 domain, but this is also better than not having NFS4 ACL support at all 8-/.
+*/
+
+static struct key_type key_type_nfs4acl_resolver = {
+	.name           = "zfs_nfs4acl_resolver",
+	.preparse       = nfs4acl_key_preparse,
+	.free_preparse  = nfs4acl_key_free_preparse,
+	.instantiate    = generic_key_instantiate,
+	.revoke         = user_revoke,
+	.destroy        = nfs4acl_key_destroy,
+	.describe       = nfs4acl_key_describe,
+	.read           = nfs4acl_key_read,
+};
+
+static int
+nfs4acl_get_key(const char *name, size_t namelen, const char *type, char **mapped_name) {
+	/* type (user/group), :, max name length, null */
+	char desc[5 + 1 + NFS4ACL_NAMESZ + 1];
+	const struct cred *saved_cred;
+	struct key *rkey;
+	const struct user_key_payload *ukp;
+	int ret;
+
+	ret = snprintf(desc, sizeof(desc), "%s:%s", type, name);
+	if (ret == -1 || ret >= sizeof(desc))
+		return (-ENOMEM);
+
+	saved_cred = override_creds(nfs4acl_resolver_cred);
+	rkey = request_key(&key_type_nfs4acl_resolver, desc, "");
+	revert_creds(saved_cred);
+
+	if (IS_ERR(rkey)) {
+		ret = PTR_ERR(rkey);
+		goto get_key_out;
+	}
+	else
+		set_bit(KEY_FLAG_ROOT_CAN_INVAL, &rkey->flags);
+
+	rcu_read_lock();
+	rkey->perm |= KEY_USR_VIEW;
+
+	ret = key_validate(rkey);
+	if (ret < 0)
+		goto get_key_out2;
+
+	/* This is user_key_payload in older kernels and user_key_payload_rcu
+	   in newer, need to detect kernel version and do right thing */
+	ukp = user_key_payload_rcu(rkey);
+	if (IS_ERR_OR_NULL(ukp)) {
+		ret = PTR_ERR(ukp);
+		goto get_key_out2;
+	}
+
+	ret = ukp->datalen;
+	if (ret == 0) {
+		ret = -EINVAL;
+		goto get_key_out2;
+	}
+
+	/* If a valid buffer is supplied, return the key and size; otherwise just the
+	   size */
+	if (mapped_name) {
+		*mapped_name = kmalloc(ret + 1, GFP_KERNEL);
+		if (!*mapped_name) {
+			ret = -ENOMEM;
+			goto get_key_out2;
+		}
+
+		memcpy(*mapped_name, ukp->data, ret);
+		memset(*mapped_name+ret, 0, 1);
+	}
+
+get_key_out2:
+	rcu_read_unlock();
+	key_put(rkey);
+
+get_key_out:
+	return ret;
+}
+
+static int
+nfs4acl_map_id_to_name(__u32 id, char *type, char **mapped_name) {
+	char lookup_str[NFS4ACL_UINT_MAXLEN];
+	int lookup_str_len;
+	int ret;
+
+	lookup_str_len = snprintf(lookup_str, sizeof(lookup_str), "%u", id);
+	if (lookup_str_len == -1 || lookup_str_len >= sizeof(lookup_str))
+		return -ENOMEM;
+
+	ret = nfs4acl_get_key(lookup_str, lookup_str_len, type, mapped_name);
+	/* if mapping fails, use a string representation of the numeric id */
+	if (ret < 0) {
+		ret = lookup_str_len;
+		/* return just the size if no valid buffer was supplied */
+		if (mapped_name) {
+			*mapped_name = kmalloc(ret+1, GFP_KERNEL);
+			if (!*mapped_name)
+				return -ENOMEM;
+
+			memcpy(*mapped_name, lookup_str, ret);
+			memset(*mapped_name+ret, 0, 1);
+		}
+	}
+
+	return ret;
+}
+
+static int
+__zpl_xattr_nfs4acl_list(struct inode *ip, char *list, size_t list_size,
+    const char *name, size_t name_len)
+{
+	char *xattr_name = NFS4ACL_XATTR;
+	size_t xattr_size = sizeof (NFS4ACL_XATTR);
+
+	if (ITOZSB(ip)->z_acl_type != ZFS_ACLTYPE_NFS4ACL)
+		return (0);
+
+	if (list && xattr_size <= list_size)
+		memcpy(list, xattr_name, xattr_size);
+
+	return (xattr_size);
+}
+ZPL_XATTR_LIST_WRAPPER(zpl_xattr_nfs4acl_list);
+
+static int
+xattr_nfs4acl_size_names(vsecattr_t *vsecp, char **mapped_names) {
+	int i, size;
+
+	/* number of aces */
+	size = sizeof(u32);
+
+	for (i = 0; i < vsecp->vsa_aclcnt; i++) {
+		ace_t *acep = vsecp->vsa_aclentp + (i * sizeof(ace_t));
+		char **mapped_name = mapped_names ?  (mapped_names + i) : NULL;
+		int who_strlen;
+
+		/* ace type */
+		size += sizeof(u32);
+
+		/* ace flags */
+		size += sizeof(u32);
+
+		/* ace access_mask */
+		size += sizeof(u32);
+
+		switch (acep->a_flags & ACE_TYPE_FLAGS) {
+			case ACE_OWNER:
+				who_strlen = strlen("owner@");
+				break;
+
+			case ACE_GROUP|ACE_IDENTIFIER_GROUP:
+				who_strlen = strlen("group@");
+				break;
+
+			case ACE_IDENTIFIER_GROUP:
+				who_strlen = nfs4acl_map_id_to_name(acep->a_who, "group", mapped_name);
+				if (who_strlen < 0) {
+					return who_strlen;
+				}
+				break;
+
+			case ACE_EVERYONE:
+				who_strlen = strlen("everyone@");
+				break;
+
+			case 0:
+				who_strlen = nfs4acl_map_id_to_name(acep->a_who, "user", mapped_name);
+				if (who_strlen < 0) {
+					return who_strlen;
+				}
+				break;
+
+			default:
+				return -EINVAL;
+				break;
+		}
+
+		/* length of who string */
+		size += sizeof(u32);
+
+		/* update length for xdr padding */
+		who_strlen = ((who_strlen / NFS4ACL_XDR_MOD) * NFS4ACL_XDR_MOD *
+			sizeof(char)) + (who_strlen % NFS4ACL_XDR_MOD ? NFS4ACL_XDR_MOD : 0);
+
+		/* who string itself */
+		size += who_strlen;
+	}
+
+	return size;
+}
+
+static int
+__zpl_xattr_nfs4acl_get(struct inode *ip, const char *name,
+    void *buffer, size_t size)
+{
+	cred_t *cr = CRED();
+	vsecattr_t vsecp;
+	char **mapped_names = NULL;
+	char *bufp;
+	int i, ret;
+
+	/* xattr_resolve_name will do this for us if this is defined */
+#ifndef HAVE_XATTR_HANDLER_NAME
+	if (strcmp(name, "") != 0)
+		return (-EINVAL);
+#endif
+	if (ITOZSB(ip)->z_acl_type != ZFS_ACLTYPE_NFS4ACL)
+		return (-EOPNOTSUPP);
+
+	vsecp.vsa_mask = VSA_ACE_ALLTYPES | VSA_ACECNT | VSA_ACE | VSA_ACE_ACLFLAGS;
+
+	crhold(cr);
+	ret = zfs_getsecattr(ip, &vsecp, 0, cr);
+	crfree(cr);
+
+	if (ret)
+		return (ret);
+
+	if (vsecp.vsa_aclcnt == 0) {
+		ret = -ENODATA;
+		goto nfs4acl_get_out;
+	}
+
+	/* If there's a valid buffer, store the mapped names so we don't need
+	   to lookup them up twice, once to calculate size and again to use them */
+	if (buffer) {
+		mapped_names = kmalloc(vsecp.vsa_aclcnt * sizeof(char *), GFP_KERNEL);
+		if (!mapped_names) {
+			ret = -ENOMEM;
+			goto nfs4acl_get_out;
+		}
+		memset(mapped_names, 0, vsecp.vsa_aclcnt * sizeof(char *));
+	}
+
+	ret = xattr_nfs4acl_size_names(&vsecp, mapped_names);
+	if (ret < 0 || !buffer) {
+		goto nfs4acl_get_out2;
+	}
+
+	if (ret > size) {
+		ret = -ERANGE;
+		goto nfs4acl_get_out2;
+	}
+		
+	bufp = buffer;
+
+	/* number of aces */
+	*((u32*)bufp) = htonl(vsecp.vsa_aclcnt);
+	bufp += sizeof(u32);
+
+	for (i = 0; i < vsecp.vsa_aclcnt; i++) {
+		ace_t *acep = vsecp.vsa_aclentp + (i * sizeof(ace_t));
+		char **mapped_name = (mapped_names + i);
+		char *who_str;
+		int who_strlen;
+
+		/* ace type */
+		*((u32*)bufp) = htonl(acep->a_type);
+		bufp += sizeof(u32);
+
+		/* ace flags */
+		*((u32*)bufp) = htonl(acep->a_flags);
+		bufp += sizeof(u32);
+
+		/* ace access_mask */
+		*((u32*)bufp) = htonl(acep->a_access_mask);
+		bufp += sizeof(u32);
+
+		switch (acep->a_flags & ACE_TYPE_FLAGS) {
+			case ACE_OWNER:
+				who_str = "owner@";
+				break;
+
+			case ACE_GROUP|ACE_IDENTIFIER_GROUP:
+				who_str = "group@";
+				break;
+
+			case ACE_IDENTIFIER_GROUP:
+				who_str = *mapped_name;
+				break;
+
+			case ACE_EVERYONE:
+				who_str = "everyone@";
+				break;
+
+			case 0:
+				who_str = *mapped_name;
+				break;
+
+			default:
+				ret = -EINVAL;
+				goto nfs4acl_get_out2;
+				break;
+		}
+
+		who_strlen = strlen(who_str);
+
+		/* length of who string */
+		*((u32*)bufp) = htonl(who_strlen);
+		bufp += sizeof(u32);
+
+		/* who string */
+		memcpy(bufp, who_str, who_strlen);
+
+		/* update for xdr padding */
+		who_strlen = ((who_strlen / NFS4ACL_XDR_MOD) * NFS4ACL_XDR_MOD *
+			sizeof(char)) + (who_strlen % NFS4ACL_XDR_MOD ? NFS4ACL_XDR_MOD : 0);
+
+		bufp += who_strlen;
+	}
+
+nfs4acl_get_out2:
+	if (mapped_names) {
+		for (i = 0; i < vsecp.vsa_aclcnt; i++) {
+			char **mapped_name = (mapped_names + i);
+
+			if (*mapped_name) {
+				kfree(*mapped_name);
+			}
+		}
+		kfree(mapped_names);
+	}
+
+
+nfs4acl_get_out:
+	kmem_free(vsecp.vsa_aclentp, vsecp.vsa_aclentsz);
+
+	return ret;
+}
+ZPL_XATTR_GET_WRAPPER(zpl_xattr_nfs4acl_get);
+
+static int
+__zpl_xattr_nfs4acl_set(struct inode *ip, const char *name,
+    const void *value, size_t size, int flags)
+{
+	cred_t *cr = CRED();
+	vsecattr_t vsecp;
+	int error;
+
+	/* xattr_resolve_name will do this for us if this is defined */
+#ifndef HAVE_XATTR_HANDLER_NAME
+	if (strcmp(name, "") != 0)
+		return (-EINVAL);
+#endif
+	if (ITOZSB(ip)->z_acl_type != ZFS_ACLTYPE_NFS4ACL)
+		return (-EOPNOTSUPP);
+
+	/* XXX not implemented yet */
+	return (-EINVAL);
+
+	crhold(cr);
+	error = zfs_setsecattr(ip, &vsecp, 0, cr);
+	crfree(cr);
+
+	return error;
+}
+ZPL_XATTR_SET_WRAPPER(zpl_xattr_nfs4acl_set);
+
+/*
+ * ACL access xattr namespace handlers.
+ *
+ * Use .name instead of .prefix when available. xattr_resolve_name will match
+ * whole name and reject anything that has .name only as prefix.
+ */
+xattr_handler_t zpl_xattr_nfs4acl_handler =
+{
+#ifdef HAVE_XATTR_HANDLER_NAME
+	.name	= NFS4ACL_XATTR,
+#else
+	.prefix	= NFS4ACL_XATTR,
+#endif
+	.list	= zpl_xattr_nfs4acl_list,
+	.get	= zpl_xattr_nfs4acl_get,
+	.set	= zpl_xattr_nfs4acl_set,
+};
+
+#endif /* CONFIG_FS_NFS4_ACL */
+
+
 xattr_handler_t *zpl_xattr_handlers[] = {
 	&zpl_xattr_security_handler,
 	&zpl_xattr_trusted_handler,
@@ -1416,6 +1884,9 @@ xattr_handler_t *zpl_xattr_handlers[] = {
 	&zpl_xattr_acl_access_handler,
 	&zpl_xattr_acl_default_handler,
 #endif /* CONFIG_FS_POSIX_ACL */
+#ifdef CONFIG_FS_NFS4_ACL
+	&zpl_xattr_nfs4acl_handler,
+#endif /* CONFIG_FS_NFS4_ACL */
 	NULL
 };
 
@@ -1444,8 +1915,72 @@ zpl_xattr_handler(const char *name)
 		return (&zpl_xattr_acl_default_handler);
 #endif /* CONFIG_FS_POSIX_ACL */
 
+#ifdef CONFIG_FS_NFS4_ACL
+	if (strncmp(name, NFS4ACL_XATTR,
+	    sizeof (NFS4ACL_XATTR)) == 0)
+		return (&zpl_xattr_nfs4acl_handler);
+#endif /* CONFIG_FS_NFS4_ACL */
+
 	return (NULL);
 }
+
+int
+zpl_xattr_init(void)
+{
+#ifdef CONFIG_FS_NFS4_ACL
+	int ret = 0;
+	struct cred *cred;
+	struct key *keyring;
+
+	cred = prepare_kernel_cred(NULL);
+
+	if (!cred)
+		return -ENOMEM;
+
+	keyring = keyring_alloc(".zfs_nfs4acl_resolver",
+			GLOBAL_ROOT_UID, GLOBAL_ROOT_GID, cred,
+			(KEY_POS_ALL & ~KEY_POS_SETATTR) |
+			KEY_USR_VIEW | KEY_USR_READ,
+			KEY_ALLOC_NOT_IN_QUOTA, NULL, NULL);
+
+	if (IS_ERR(keyring)) {
+		ret = PTR_ERR(keyring);
+		goto xattr_init_out;
+	}
+
+	ret = register_key_type(&key_type_nfs4acl_resolver);
+	if (ret < 0)
+		goto xattr_init_out2;
+
+	set_bit(KEY_FLAG_ROOT_CAN_CLEAR, &keyring->flags);
+	cred->thread_keyring = keyring;
+	cred->jit_keyring = KEY_REQKEY_DEFL_THREAD_KEYRING;
+	nfs4acl_resolver_cred = cred;
+
+	return 0;
+
+xattr_init_out2:
+	key_put(keyring);
+
+xattr_init_out:
+	put_cred(cred);
+
+	return ret;
+
+#endif /* CONFIG_FS_NFS4_ACL */
+
+	return 0;
+}
+
+void
+zpl_xattr_fini(void) {
+#ifdef CONFIG_FS_NFS4_ACL
+	key_revoke(nfs4acl_resolver_cred->thread_keyring);
+	unregister_key_type(&key_type_nfs4acl_resolver);
+	put_cred(nfs4acl_resolver_cred);
+#endif /* CONFIG_FS_NFS4_ACL */
+}
+
 
 #if !defined(HAVE_POSIX_ACL_RELEASE) || defined(HAVE_POSIX_ACL_RELEASE_GPL_ONLY)
 struct acl_rel_struct {

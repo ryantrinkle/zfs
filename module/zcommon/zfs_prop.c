@@ -159,6 +159,7 @@ zfs_prop_init(void)
 		{ "disabled",	ZFS_ACLTYPE_OFF },
 		{ "noacl",	ZFS_ACLTYPE_OFF },
 		{ "posixacl",	ZFS_ACLTYPE_POSIXACL },
+		{ "nfs4acl",	ZFS_ACLTYPE_NFS4ACL },
 		{ NULL }
 	};
 

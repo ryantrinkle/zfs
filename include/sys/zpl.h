@@ -25,6 +25,14 @@
 #ifndef	_SYS_ZPL_H
 #define	_SYS_ZPL_H
 
+/* XXX stuck this here for now just to make it work. posix acl support is
+       controlled by the kernel config option CONFIG_FS_POSIX_ACL, there
+       isn't really anything similar for NFS4 ACL's. The closest thing might
+       be CONFIG_NFS_ACL_SUPPORT, but that doesn't really seem appropriate.
+       Maybe the native zfs acl support shouldn't be conditional? Just always
+       available? */
+#define CONFIG_FS_NFS4_ACL
+
 #include <sys/mntent.h>
 #include <sys/vfs.h>
 #include <linux/aio.h>
