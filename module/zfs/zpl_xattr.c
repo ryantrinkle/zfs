@@ -1422,9 +1422,10 @@ static const struct cred *nfs4acl_resolver_cred;
 #define NFS4ACL_UINT_MAXLEN 11
 #define NFS4ACL_XDR_MOD 4
 
-/* XXX The functions in security/keys/user_defined.c are marked GPL-only; these are
+/* XXX The default functions from the Linux kernel for this defined in
+   security/keys/user_defined.c are marked GPL-only; these are
    logically equivilent but not copied, any issues with that? */
-int
+static int
 nfs4acl_key_preparse(struct key_preparsed_payload *kpp)
 {
 	struct user_key_payload *ukp;
@@ -1444,13 +1445,13 @@ nfs4acl_key_preparse(struct key_preparsed_payload *kpp)
 	return 0;
 }
 
-void
+static void
 nfs4acl_key_free_preparse(struct key_preparsed_payload *kpp)
 {
 	kfree(kpp->payload.data[0]);
 }
 
-void
+static void
 nfs4acl_key_destroy(struct key *k)
 {
 	struct user_key_payload *ukp = k->payload.data[0];
@@ -1458,7 +1459,7 @@ nfs4acl_key_destroy(struct key *k)
 	kfree(ukp);
 }
 
-void
+static void
 nfs4acl_key_describe(const struct key *k, struct seq_file *sf)
 {
 	seq_puts(sf, k->description);
@@ -1466,14 +1467,14 @@ nfs4acl_key_describe(const struct key *k, struct seq_file *sf)
 		seq_printf(sf, ": %u", k->datalen);
 }
 
-long
-nfs4acl_key_read(const struct key *k, char __user *ub, size_t ublen)
+static long
+__nfs4acl_key_read(const struct key *k, char __user *ub, size_t ublen)
 {
 	const struct user_key_payload *ukp;
 	long ret;
 
-	/* XXX function user_key_payload in older kernels,
-	       need to wrap this to do the right thing based on version */
+	/* XXX function was user_key_payload in older kernels, changed in 4.11
+	       - need to wrap this to do the right thing based on version */
 	ukp = user_key_payload_rcu(k);
 	ret = ukp->datalen;
 
@@ -1511,7 +1512,8 @@ static struct key_type key_type_nfs4acl_resolver = {
 };
 
 static int
-nfs4acl_get_key(const char *name, size_t namelen, const char *type, char **mapped_name) {
+nfs4acl_get_key(const char *name, size_t namelen, const char *type,
+		char **allocp, char *bufp, int size) {
 	/* type (user/group), :, max name length, null */
 	char desc[5 + 1 + NFS4ACL_NAMESZ + 1];
 	const struct cred *saved_cred;
@@ -1541,8 +1543,8 @@ nfs4acl_get_key(const char *name, size_t namelen, const char *type, char **mappe
 	if (ret < 0)
 		goto get_key_out2;
 
-	/* This is user_key_payload in older kernels and user_key_payload_rcu
-	   in newer, need to detect kernel version and do right thing */
+	/* XXX function was user_key_payload in older kernels, changed in 4.11
+	       - need to wrap this to do the right thing based on version */
 	ukp = user_key_payload_rcu(rkey);
 	if (IS_ERR_OR_NULL(ukp)) {
 		ret = PTR_ERR(ukp);
@@ -1555,17 +1557,23 @@ nfs4acl_get_key(const char *name, size_t namelen, const char *type, char **mappe
 		goto get_key_out2;
 	}
 
-	/* If a valid buffer is supplied, return the key and size; otherwise just the
-	   size */
-	if (mapped_name) {
-		*mapped_name = kmalloc(ret + 1, GFP_KERNEL);
-		if (!*mapped_name) {
+	if (allocp) {
+		*allocp = kmalloc(ret + 1, GFP_KERNEL);
+		if (!*allocp) {
 			ret = -ENOMEM;
 			goto get_key_out2;
 		}
 
-		memcpy(*mapped_name, ukp->data, ret);
-		memset(*mapped_name+ret, 0, 1);
+		memcpy(*allocp, ukp->data, ret);
+		memset(*allocp+ret, 0, 1);
+	}
+	else if (bufp) {
+		if (size < ret + 1) {
+			ret = -ERANGE;
+			goto get_key_out2;
+		}
+		memcpy(bufp, ukp->data, ret);
+		memset(bufp+ret, 0, 1);
 	}
 
 get_key_out2:
@@ -1586,7 +1594,7 @@ nfs4acl_map_id_to_name(__u32 id, char *type, char **mapped_name) {
 	if (lookup_str_len == -1 || lookup_str_len >= sizeof(lookup_str))
 		return -ENOMEM;
 
-	ret = nfs4acl_get_key(lookup_str, lookup_str_len, type, mapped_name);
+	ret = nfs4acl_get_key(lookup_str, lookup_str_len, type, mapped_name, NULL, 0);
 	/* if mapping fails, use a string representation of the numeric id */
 	if (ret < 0) {
 		ret = lookup_str_len;
@@ -1688,6 +1696,68 @@ xattr_nfs4acl_size_names(vsecattr_t *vsecp, char **mapped_names) {
 	return size;
 }
 
+/* XXX - WTF, zfs acl flags and nfs4-acl-tools flags don't match???
+
+   From zfs acl.h:
+
+	#define ACE_INHERITED_ACE               0x0080
+	#define ACE_OWNER                       0x1000
+	#define ACE_GROUP                       0x2000
+	#define ACE_EVERYONE                    0x4000
+
+   From nfs4-acl-tools:
+
+	#define NFS4_ACE_OWNER                        0x00000080
+	#define NFS4_ACE_GROUP                        0x00000100
+	#define NFS4_ACE_EVERYONE                     0x00000200
+*/
+
+/* Values from nfs4-acl-tools for mapping purposes */
+#define NFS4_ACE_OWNER		0x00000080
+#define NFS4_ACE_GROUP		0x00000100
+#define NFS4_ACE_EVERYONE	0x00000200
+
+static uint16_t nfs4_acl_tools_map(uint16_t a_flags, int map_to)
+{
+	if (map_to) {
+		if (a_flags & ACE_INHERITED_ACE)
+			a_flags &= ~ACE_INHERITED_ACE;
+
+		if (a_flags & ACE_OWNER) {
+			a_flags &= ~ACE_OWNER;
+			a_flags |= NFS4_ACE_OWNER;
+		}
+
+		if (a_flags & ACE_GROUP) {
+			a_flags &= ~ACE_GROUP;
+			a_flags |= NFS4_ACE_GROUP;
+		}
+
+		if (a_flags & ACE_EVERYONE) {
+			a_flags &= ~ACE_EVERYONE;
+			a_flags |= NFS4_ACE_EVERYONE;
+		}
+	}
+	else {
+		if (a_flags & NFS4_ACE_OWNER) {
+			a_flags &= ~NFS4_ACE_OWNER;
+			a_flags |= ACE_OWNER;
+		}
+
+		if (a_flags & NFS4_ACE_GROUP) {
+			a_flags &= ~NFS4_ACE_GROUP;
+			a_flags |= ACE_GROUP;
+		}
+
+		if (a_flags & NFS4_ACE_EVERYONE) {
+			a_flags &= ~NFS4_ACE_EVERYONE;
+			a_flags |= ACE_EVERYONE;
+		}
+	}
+
+	return a_flags;
+}
+
 static int
 __zpl_xattr_nfs4acl_get(struct inode *ip, const char *name,
     void *buffer, size_t size)
@@ -1758,7 +1828,7 @@ __zpl_xattr_nfs4acl_get(struct inode *ip, const char *name,
 		bufp += sizeof(u32);
 
 		/* ace flags */
-		*((u32*)bufp) = htonl(acep->a_flags);
+		*((u32*)bufp) = htonl(nfs4_acl_tools_map(acep->a_flags, 1));
 		bufp += sizeof(u32);
 
 		/* ace access_mask */
@@ -1833,8 +1903,11 @@ __zpl_xattr_nfs4acl_set(struct inode *ip, const char *name,
     const void *value, size_t size, int flags)
 {
 	cred_t *cr = CRED();
+	char id_str[NFS4ACL_UINT_MAXLEN];
 	vsecattr_t vsecp;
-	int error;
+	char *bufp;
+	int used_size, i;
+	int ret = 0;
 
 	/* xattr_resolve_name will do this for us if this is defined */
 #ifndef HAVE_XATTR_HANDLER_NAME
@@ -1844,14 +1917,127 @@ __zpl_xattr_nfs4acl_set(struct inode *ip, const char *name,
 	if (ITOZSB(ip)->z_acl_type != ZFS_ACLTYPE_NFS4ACL)
 		return (-EOPNOTSUPP);
 
-	/* XXX not implemented yet */
-	return (-EINVAL);
+	bufp = (char *)value;
+
+	/* number of aces */
+	used_size = sizeof(u32);
+	if (used_size > size)
+		return (-EINVAL);
+
+	vsecp.vsa_aclcnt = ntohl(*((u32 *)bufp));
+	bufp += sizeof(u32);
+
+	vsecp.vsa_aclentp = kmalloc(vsecp.vsa_aclcnt * sizeof(ace_t), GFP_KERNEL);
+	if (!vsecp.vsa_aclentp)
+		return -ENOMEM;
+
+	vsecp.vsa_aclentsz = vsecp.vsa_aclcnt * sizeof(ace_t);
+
+	for (i = 0; i < vsecp.vsa_aclcnt; i++) {
+		ace_t *acep = vsecp.vsa_aclentp + (i * sizeof(ace_t));
+		int who_strlen;
+
+		/* ace type */
+		used_size += sizeof(u32);
+		if (used_size > size)
+			return (-EINVAL);
+		acep->a_type = ntohl(*((u32 *)bufp));
+		bufp += sizeof(u32);
+
+		/* ace flags */
+		used_size += sizeof(u32);
+		if (used_size > size)
+			return (-EINVAL);
+
+		acep->a_flags = nfs4_acl_tools_map(ntohl(*((u32 *)bufp)), 0);
+		bufp += sizeof(u32);
+
+		/* ace access_mask */
+		used_size += sizeof(u32);
+		if (used_size > size)
+			return (-EINVAL);
+		acep->a_access_mask = ntohl(*((u32 *)bufp));
+		bufp += sizeof(u32);
+
+		/* length of who string */
+		used_size += sizeof(u32);
+		if (used_size > size)
+			return (-EINVAL);
+		who_strlen = ntohl(*((u32 *)bufp));
+		bufp += sizeof(u32);
+
+		used_size += who_strlen;
+		if (used_size > size)
+			return (-EINVAL);
+
+		switch (acep->a_flags & ACE_TYPE_FLAGS) {
+			case ACE_OWNER:
+			case ACE_GROUP|ACE_IDENTIFIER_GROUP:
+			case ACE_EVERYONE:
+				acep->a_who = -1;
+				break;
+
+			case ACE_IDENTIFIER_GROUP:
+			case 0: {
+				long id_long;
+
+				ret = nfs4acl_get_key(bufp, who_strlen,
+					acep->a_flags & ACE_TYPE_FLAGS ? "gid" : "uid",
+					NULL, id_str, sizeof(id_str));
+
+				/* If we couldn't map the name to a numeric id, see if
+				   the name is all digits, and if so, just use it as the
+				   id directly */
+				if (ret < 0) {
+					int c = 0;
+					while (c < who_strlen && c < sizeof(id_str)) {
+						if (bufp[c] == '@') {
+							id_str[c] = '\0';
+							ret = 0;
+							break;
+						}
+						if (!isdigit(bufp[c]))
+							break;
+
+						id_str[c] = bufp[c];
+						c++;
+					}
+
+					if (ret < 0 || c == 0) {
+						ret = -EINVAL;
+						goto nfs4acl_set_out;
+					}
+				}
+
+				ret = kstrtol(id_str, 10, &id_long);
+				if (ret < 0)
+					goto nfs4acl_set_out;
+
+				acep->a_who = id_long;
+				break;
+			}
+			default:
+				ret = -EINVAL;
+				goto nfs4acl_set_out;
+				break;
+		}
+
+		/* update for xdr padding */
+		who_strlen = ((who_strlen / NFS4ACL_XDR_MOD) * NFS4ACL_XDR_MOD *
+			sizeof(char)) + (who_strlen % NFS4ACL_XDR_MOD ? NFS4ACL_XDR_MOD : 0);
+
+		bufp += who_strlen;
+	}
 
 	crhold(cr);
-	error = zfs_setsecattr(ip, &vsecp, 0, cr);
+	ret = zfs_setsecattr(ip, &vsecp, 0, cr);
 	crfree(cr);
 
-	return error;
+nfs4acl_set_out:
+
+	kfree(vsecp.vsa_aclentp);
+
+	return ret;
 }
 ZPL_XATTR_SET_WRAPPER(zpl_xattr_nfs4acl_set);
 
