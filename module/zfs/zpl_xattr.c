@@ -1468,7 +1468,7 @@ nfs4acl_key_describe(const struct key *k, struct seq_file *sf)
 }
 
 static long
-__nfs4acl_key_read(const struct key *k, char __user *ub, size_t ublen)
+nfs4acl_key_read(const struct key *k, char __user *ub, size_t ublen)
 {
 	const struct user_key_payload *ukp;
 	long ret;
