@@ -2327,9 +2327,10 @@ zfs_init(void)
 	zfs_znode_init();
 	dmu_objset_register_type(DMU_OST_ZFS, zfs_space_delta_cb);
 	register_filesystem(&zpl_fs_type);
-	/* XXX - review said to move this call here, but this function doesn't
-	 *       check for or return errors? What to do if this init call fails?
-         */
+	/*
+	 * XXX - review said to move this call here, but this function doesn't
+	 * check for or return errors? What to do if this init call fails?
+	 */
 	if ((error = zpl_xattr_init()) != 0)
 		;
 }
