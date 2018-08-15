@@ -1418,16 +1418,13 @@ static const struct cred *nfs4acl_resolver_cred;
 #define NFS4ACL_UINT_MAXLEN 11
 #define NFS4ACL_XDR_MOD 4
 
-/* XXX The default functions from the Linux kernel for this defined in
-   security/keys/user_defined.c are marked GPL-only; these are
-   logically equivilent but not copied, any issues with that? */
 static int
 nfs4acl_key_preparse(struct key_preparsed_payload *kpp)
 {
 	struct user_key_payload *ukp;
 	size_t dl = kpp->datalen;
 
-	if (!kpp->data || dl < 1 || dl > 32767)
+	if (kpp->data == NULL || dl < 1 || dl > 32767)
 		return -EINVAL;
 
 	ukp = kmalloc(dl + sizeof(*ukp), GFP_KERNEL);
@@ -1438,7 +1435,8 @@ nfs4acl_key_preparse(struct key_preparsed_payload *kpp)
 	kpp->quotalen = dl;
 	kpp->payload.data[0] = ukp;
 	memcpy(ukp->data, kpp->data, dl);
-	return 0;
+
+	return (0);
 }
 
 static void
