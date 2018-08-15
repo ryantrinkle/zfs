@@ -56,6 +56,7 @@
 #include <sys/dmu_objset.h>
 #include <sys/spa_boot.h>
 #include <sys/zpl.h>
+#include <sys/zpl_xattr.h>
 #include "zfs_comutil.h"
 
 enum {
@@ -2324,10 +2325,17 @@ zfs_get_vfs_flag_unmounted(objset_t *os)
 void
 zfs_init(void)
 {
+	int error;
+
 	zfsctl_init();
 	zfs_znode_init();
 	dmu_objset_register_type(DMU_OST_ZFS, zfs_space_delta_cb);
 	register_filesystem(&zpl_fs_type);
+	/* XXX - review said to move this call here, but this function doesn't
+	 *       check for or return errors? What to do if this init call fails?
+         */
+	if ((error = zpl_xattr_init()) != 0)
+		;
 }
 
 void
@@ -2338,6 +2346,7 @@ zfs_fini(void)
 	 */
 	taskq_wait(system_delay_taskq);
 	taskq_wait(system_taskq);
+	zpl_xattr_fini();
 	unregister_filesystem(&zpl_fs_type);
 	zfs_znode_fini();
 	zfsctl_fini();

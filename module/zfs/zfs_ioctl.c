@@ -196,8 +196,6 @@
 #include "zfs_deleg.h"
 #include "zfs_comutil.h"
 
-#include <sys/zpl_xattr.h>
-
 #include <sys/lua/lua.h>
 #include <sys/lua/lauxlib.h>
 
@@ -7096,9 +7094,6 @@ _init(void)
 
 	zfs_ioctl_init();
 
-	if ((error = zpl_xattr_init()) != 0)
-		goto out;
-
 	if ((error = zfs_attach()) != 0)
 		goto out;
 
@@ -7134,7 +7129,6 @@ _fini(void)
 	zfs_fini();
 	spa_fini();
 	zvol_fini();
-	zpl_xattr_fini();
 
 	tsd_destroy(&zfs_fsyncer_key);
 	tsd_destroy(&rrw_tsd_key);
