@@ -1413,7 +1413,7 @@ xattr_handler_t zpl_xattr_acl_default_handler =
 
 #endif /* CONFIG_FS_POSIX_ACL */
 
-#ifdef CONFIG_FS_NFS4_ACL
+#ifdef ZFS_NFS4_ACL
 
 static const struct cred *nfs4acl_resolver_cred;
 
@@ -2059,7 +2059,7 @@ xattr_handler_t zpl_xattr_nfs4acl_handler =
 	.set	= zpl_xattr_nfs4acl_set,
 };
 
-#endif /* CONFIG_FS_NFS4_ACL */
+#endif /* ZFS_NFS4_ACL */
 
 
 xattr_handler_t *zpl_xattr_handlers[] = {
@@ -2070,9 +2070,9 @@ xattr_handler_t *zpl_xattr_handlers[] = {
 	&zpl_xattr_acl_access_handler,
 	&zpl_xattr_acl_default_handler,
 #endif /* CONFIG_FS_POSIX_ACL */
-#ifdef CONFIG_FS_NFS4_ACL
+#ifdef ZFS_NFS4_ACL
 	&zpl_xattr_nfs4acl_handler,
-#endif /* CONFIG_FS_NFS4_ACL */
+#endif /* ZFS_NFS4_ACL */
 	NULL
 };
 
@@ -2101,11 +2101,11 @@ zpl_xattr_handler(const char *name)
 		return (&zpl_xattr_acl_default_handler);
 #endif /* CONFIG_FS_POSIX_ACL */
 
-#ifdef CONFIG_FS_NFS4_ACL
+#ifdef ZFS_NFS4_ACL
 	if (strncmp(name, NFS4ACL_XATTR,
 	    sizeof (NFS4ACL_XATTR)) == 0)
 		return (&zpl_xattr_nfs4acl_handler);
-#endif /* CONFIG_FS_NFS4_ACL */
+#endif /* ZFS_NFS4_ACL */
 
 	return (NULL);
 }
@@ -2113,7 +2113,7 @@ zpl_xattr_handler(const char *name)
 int
 zpl_xattr_init(void)
 {
-#ifdef CONFIG_FS_NFS4_ACL
+#ifdef ZFS_NFS4_ACL
 	int ret = 0;
 	struct cred *cred;
 	struct key *keyring;
@@ -2153,18 +2153,18 @@ xattr_init_out:
 
 	return ret;
 
-#endif /* CONFIG_FS_NFS4_ACL */
+#endif /* ZFS_NFS4_ACL */
 
 	return 0;
 }
 
 void
 zpl_xattr_fini(void) {
-#ifdef CONFIG_FS_NFS4_ACL
+#ifdef ZFS_NFS4_ACL
 	key_revoke(nfs4acl_resolver_cred->thread_keyring);
 	unregister_key_type(&key_type_nfs4acl_resolver);
 	put_cred(nfs4acl_resolver_cred);
-#endif /* CONFIG_FS_NFS4_ACL */
+#endif /* ZFS_NFS4_ACL */
 }
 
 

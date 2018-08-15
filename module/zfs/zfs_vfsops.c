@@ -356,7 +356,7 @@ acltype_changed_cb(void *arg, uint64_t newval)
 		zfsvfs->z_sb->s_flags &= ~MS_POSIXACL;
 #endif /* CONFIG_FS_POSIX_ACL */
 	case ZFS_ACLTYPE_NFS4ACL:
-#ifdef CONFIG_FS_NFS4_ACL
+#ifdef ZFS_NFS4_ACL
 		zfsvfs->z_acl_type = ZFS_ACLTYPE_NFS4ACL;
 		/* XXX do we need to do something like this? */
 		/* zfsvfs->z_sb->s_flags |= MS_NFS4ACL; XXX ? */
