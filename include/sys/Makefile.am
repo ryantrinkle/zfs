@@ -129,6 +129,7 @@ COMMON_H = \
 	$(top_srcdir)/include/sys/zio.h \
 	$(top_srcdir)/include/sys/zio_impl.h \
 	$(top_srcdir)/include/sys/zio_priority.h \
+	$(top_srcdir)/include/sys/zpl_xattr.h \
 	$(top_srcdir)/include/sys/zrlock.h \
 	$(top_srcdir)/include/sys/zthr.h
 
