@@ -77,10 +77,6 @@
  * largely avoids the issue except in the overflow case.
  */
 
-#include <linux/key.h>
-#include <linux/keyctl.h>
-#include <linux/key-type.h>
-#include <keys/user-type.h>
 #include <sys/zfs_vfsops.h>
 #include <sys/zfs_vnops.h>
 #include <sys/zfs_znode.h>

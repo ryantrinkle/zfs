@@ -26,6 +26,10 @@
 #ifndef _ZFS_XATTR_H
 #define	_ZFS_XATTR_H
 
+#include <linux/key.h>
+#include <linux/keyctl.h>
+#include <linux/key-type.h>
+#include <keys/user-type.h>
 #include <linux/posix_acl_xattr.h>
 
 /*
