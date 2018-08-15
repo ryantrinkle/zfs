@@ -1427,10 +1427,7 @@ nfs4acl_key_preparse(struct key_preparsed_payload *kpp)
 	if (kpp->data == NULL || dl < 1 || dl > 32767)
 		return -EINVAL;
 
-	ukp = kmalloc(dl + sizeof(*ukp), GFP_KERNEL);
-	if (!ukp)
-		return -ENOMEM;
-
+	ukp = kmem_alloc(dl + sizeof(*ukp), KM_SLEEP);
 	ukp->datalen = dl;
 	kpp->quotalen = dl;
 	kpp->payload.data[0] = ukp;
@@ -1552,12 +1549,7 @@ nfs4acl_get_key(const char *name, size_t namelen, const char *type,
 	}
 
 	if (allocp) {
-		*allocp = kmalloc(ret + 1, GFP_KERNEL);
-		if (!*allocp) {
-			ret = -ENOMEM;
-			goto get_key_out2;
-		}
-
+		*allocp = kmem_alloc(ret + 1, KM_SLEEP);
 		memcpy(*allocp, ukp->data, ret);
 		memset(*allocp+ret, 0, 1);
 	}
@@ -1594,10 +1586,7 @@ nfs4acl_map_id_to_name(__u32 id, char *type, char **mapped_name) {
 		ret = lookup_str_len;
 		/* return just the size if no valid buffer was supplied */
 		if (mapped_name) {
-			*mapped_name = kmalloc(ret+1, GFP_KERNEL);
-			if (!*mapped_name)
-				return -ENOMEM;
-
+			*mapped_name = kmem_alloc(ret+1, KM_SLEEP);
 			memcpy(*mapped_name, lookup_str, ret);
 			memset(*mapped_name+ret, 0, 1);
 		}
@@ -1787,11 +1776,7 @@ __zpl_xattr_nfs4acl_get(struct inode *ip, const char *name,
 	/* If there's a valid buffer, store the mapped names so we don't need
 	   to lookup them up twice, once to calculate size and again to use them */
 	if (buffer) {
-		mapped_names = kmalloc(vsecp.vsa_aclcnt * sizeof(char *), GFP_KERNEL);
-		if (!mapped_names) {
-			ret = -ENOMEM;
-			goto nfs4acl_get_out;
-		}
+		mapped_names = kmem_alloc(vsecp.vsa_aclcnt * sizeof(char *), KM_SLEEP);
 		memset(mapped_names, 0, vsecp.vsa_aclcnt * sizeof(char *));
 	}
 
@@ -1878,10 +1863,10 @@ nfs4acl_get_out2:
 			char **mapped_name = (mapped_names + i);
 
 			if (*mapped_name) {
-				kfree(*mapped_name);
+				kmem_free(*mapped_name, strlen(*mapped_name)+1);
 			}
 		}
-		kfree(mapped_names);
+		kmem_free(mapped_names, vsecp.vsa_aclcnt * sizeof(char *));
 	}
 
 
@@ -1921,10 +1906,7 @@ __zpl_xattr_nfs4acl_set(struct inode *ip, const char *name,
 	vsecp.vsa_aclcnt = ntohl(*((u32 *)bufp));
 	bufp += sizeof(u32);
 
-	vsecp.vsa_aclentp = kmalloc(vsecp.vsa_aclcnt * sizeof(ace_t), GFP_KERNEL);
-	if (!vsecp.vsa_aclentp)
-		return -ENOMEM;
-
+	vsecp.vsa_aclentp = kmem_alloc(vsecp.vsa_aclcnt * sizeof(ace_t), KM_SLEEP);
 	vsecp.vsa_aclentsz = vsecp.vsa_aclcnt * sizeof(ace_t);
 
 	for (i = 0; i < vsecp.vsa_aclcnt; i++) {
@@ -2029,7 +2011,7 @@ __zpl_xattr_nfs4acl_set(struct inode *ip, const char *name,
 
 nfs4acl_set_out:
 
-	kfree(vsecp.vsa_aclentp);
+	kmem_free(vsecp.vsa_aclentp, vsecp.vsa_aclcnt * sizeof(ace_t));
 
 	return ret;
 }
