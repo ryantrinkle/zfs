@@ -1767,7 +1767,7 @@ __zpl_xattr_nfs4acl_get(struct inode *ip, const char *name,
 	    VSA_ACE_ACLFLAGS;
 
 	crhold(cr);
-	ret = zfs_getsecattr(ip, &vsecp, 0, cr);
+	ret = -zfs_getsecattr(ip, &vsecp, 0, cr);
 	crfree(cr);
 
 	if (ret)
@@ -2021,7 +2021,7 @@ __zpl_xattr_nfs4acl_set(struct inode *ip, const char *name,
 	}
 
 	crhold(cr);
-	ret = zfs_setsecattr(ip, &vsecp, 0, cr);
+	ret = -zfs_setsecattr(ip, &vsecp, 0, cr);
 	crfree(cr);
 
 nfs4acl_set_out:
