@@ -219,6 +219,12 @@ fn(struct inode *ip, const char *name, const void *buffer,		\
 	security_inode_init_security(ip, dip, nm, val, len)
 #endif /* HAVE_6ARGS_SECURITY_INODE_INIT_SECURITY */
 
+#ifdef HAVE_USER_KEY_PAYLOAD
+#define	zpl_user_key_payload_rcu(k) user_key_payload(k)
+#else
+#define	zpl_user_key_payload_rcu(k) user_key_payload_rcu(k)
+#endif /* HAVE_USER_KEY_PAYLOAD */
+
 /*
  * Linux 3.7 API change. posix_acl_{from,to}_xattr gained the user_ns
  * parameter.  All callers are expected to pass the &init_user_ns which

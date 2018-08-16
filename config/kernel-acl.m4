@@ -324,3 +324,25 @@ AC_DEFUN([ZFS_AC_KERNEL_GET_ACL_HANDLE_CACHE], [
 		AC_MSG_RESULT(no)
 	])
 ])
+
+dnl #
+dnl # 4.11 API change
+dnl # user_key_payload was split into two functions, user_key_payload_rcu
+dnl # and user_key_payload_locked
+dnl #
+AC_DEFUN([ZFS_AC_KERNEL_USER_KEY_PAYLOAD], [
+	AC_MSG_CHECKING([whether user_key_payload() exists])
+	ZFS_LINUX_TRY_COMPILE([
+		#include <keys/user-type.h>
+	],[
+		const struct user_key_payload *ukp;
+		const struct key *k = NULL;
+
+		ukp = user_key_payload(k);
+	],[
+		AC_MSG_RESULT(yes)
+		AC_DEFINE(HAVE_USER_KEY_PAYLOAD, 1, [user_key_payload() exists])
+	],[
+		AC_MSG_RESULT(no)
+	])
+])

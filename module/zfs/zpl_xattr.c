@@ -1464,11 +1464,7 @@ nfs4acl_key_read(const struct key *k, char __user *ub, size_t ublen)
 	const struct user_key_payload *ukp;
 	long ret;
 
-	/*
-	 * XXX function was user_key_payload in older kernels, changed in 4.11
-	 *	- need to wrap this to do the right thing based on version
-	 */
-	ukp = user_key_payload_rcu(k);
+	ukp = zpl_user_key_payload_rcu(k);
 	ret = ukp->datalen;
 
 	if (ub && ublen > 0) {
@@ -1539,11 +1535,7 @@ nfs4acl_get_key(const char *name, size_t namelen, const char *type,
 	if (ret < 0)
 		goto get_key_out2;
 
-	/*
-	 * XXX function was user_key_payload in older kernels, changed in 4.11
-	 *      - need to wrap this to do the right thing based on version
-	 */
-	ukp = user_key_payload_rcu(rkey);
+	ukp = zpl_user_key_payload_rcu(rkey);
 	if (IS_ERR_OR_NULL(ukp)) {
 		ret = PTR_ERR(ukp);
 		goto get_key_out2;
