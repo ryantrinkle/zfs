@@ -1073,7 +1073,7 @@ accordance to the requested mode from the application.
 The
 .Sy aclinherit
 property does not apply to posix ACLs.
-.It Sy acltype Ns = Ns Sy off Ns | Ns Sy noacl Ns | Ns Sy posixacl
+.It Sy acltype Ns = Ns Sy off Ns | Ns Sy noacl Ns | Ns Sy nfs4acl Ns | Ns Sy posixacl
 Controls whether ACLs are enabled and if so what type of ACL to use.
 .Bl -tag -width "posixacl"
 .It Sy off
@@ -1083,6 +1083,8 @@ property set to off then ACLs are disabled.
 .It Sy noacl
 an alias for
 .Sy off
+.It Sy nfs4acl
+indicates the native ZFS NFSv4 based ACLs should be used
 .It Sy posixacl
 indicates posix ACLs should be used. Posix ACLs are specific to Linux and are
 not functional on other platforms. Posix ACLs are stored as an extended
