@@ -1084,7 +1084,16 @@ property set to off then ACLs are disabled.
 an alias for
 .Sy off
 .It Sy nfs4acl
-indicates the native ZFS NFSv4 based ACLs should be used
+indicates the native ZFS NFSv4 based ACLs should be used. The Linux implementation of
+native ZFS ACLs uses the kernel request-key mechanism, and requires the NFSv4
+nfsidmap program installed as well as the following line in either /etc/request-key.conf
+or in a file in /etc/request-key.d: 
+.Bd -literal
+create zfs_nfs4acl_resolver * * /usr/sbin/nfsidmap -t 600 %k %d
+.Ed
+
+Unless you are installing zfs manually, this dependency and configuration was likely
+dealt with by your package manager.
 .It Sy posixacl
 indicates posix ACLs should be used. Posix ACLs are specific to Linux and are
 not functional on other platforms. Posix ACLs are stored as an extended
