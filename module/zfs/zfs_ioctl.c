@@ -208,7 +208,7 @@
 kmutex_t zfsdev_state_lock;
 zfsdev_state_t *zfsdev_state_list;
 
-extern void zfs_init(void);
+extern int zfs_init(void);
 extern void zfs_fini(void);
 
 uint_t zfs_fsyncer_key;
@@ -7090,7 +7090,8 @@ _init(void)
 		return (error);
 
 	spa_init(FREAD | FWRITE);
-	zfs_init();
+	if ((error = zfs_init()) != 0)
+		goto out;
 
 	zfs_ioctl_init();
 

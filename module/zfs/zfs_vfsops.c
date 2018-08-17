@@ -2318,21 +2318,14 @@ zfs_get_vfs_flag_unmounted(objset_t *os)
 	return (unmounted);
 }
 
-void
+int
 zfs_init(void)
 {
-	int error;
-
 	zfsctl_init();
 	zfs_znode_init();
 	dmu_objset_register_type(DMU_OST_ZFS, zfs_space_delta_cb);
 	register_filesystem(&zpl_fs_type);
-	/*
-	 * XXX - review said to move this call here, but this function doesn't
-	 * check for or return errors? What to do if this init call fails?
-	 */
-	if ((error = zpl_xattr_init()) != 0)
-		;
+	return zpl_xattr_init();
 }
 
 void
