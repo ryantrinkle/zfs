@@ -1636,11 +1636,11 @@ xattr_nfs4acl_size_names(vsecattr_t *vsecp, char **mapped_names)
 
 		switch (acep->a_flags & ACE_TYPE_FLAGS) {
 			case ACE_OWNER:
-				who_strlen = strlen("owner@");
+				who_strlen = strlen("OWNER@");
 				break;
 
 			case ACE_GROUP|ACE_IDENTIFIER_GROUP:
-				who_strlen = strlen("group@");
+				who_strlen = strlen("GROUP@");
 				break;
 
 			case ACE_IDENTIFIER_GROUP:
@@ -1652,7 +1652,7 @@ xattr_nfs4acl_size_names(vsecattr_t *vsecp, char **mapped_names)
 				break;
 
 			case ACE_EVERYONE:
-				who_strlen = strlen("everyone@");
+				who_strlen = strlen("EVERYONE@");
 				break;
 
 			case 0:
@@ -1681,68 +1681,6 @@ xattr_nfs4acl_size_names(vsecattr_t *vsecp, char **mapped_names)
 	}
 
 	return (size);
-}
-
-/*
- * XXX - WTF, zfs acl flags and nfs4-acl-tools flags don't match???
- *
- *   From zfs acl.h:
- *
- *	#define ACE_INHERITED_ACE               0x0080
- *	#define ACE_OWNER                       0x1000
- *	#define ACE_GROUP                       0x2000
- *	#define ACE_EVERYONE                    0x4000
- *
- *   From nfs4-acl-tools:
- *
- *	#define NFS4_ACE_OWNER                        0x00000080
- *	#define NFS4_ACE_GROUP                        0x00000100
- *	#define NFS4_ACE_EVERYONE                     0x00000200
- */
-
-/* Values from nfs4-acl-tools for mapping purposes */
-#define	NFS4_ACE_OWNER		0x00000080
-#define	NFS4_ACE_GROUP		0x00000100
-#define	NFS4_ACE_EVERYONE	0x00000200
-
-static uint16_t nfs4_acl_tools_map(uint16_t a_flags, int map_to)
-{
-	if (map_to) {
-		if (a_flags & ACE_INHERITED_ACE)
-			a_flags &= ~ACE_INHERITED_ACE;
-
-		if (a_flags & ACE_OWNER) {
-			a_flags &= ~ACE_OWNER;
-			a_flags |= NFS4_ACE_OWNER;
-		}
-
-		if (a_flags & ACE_GROUP) {
-			a_flags &= ~ACE_GROUP;
-			a_flags |= NFS4_ACE_GROUP;
-		}
-
-		if (a_flags & ACE_EVERYONE) {
-			a_flags &= ~ACE_EVERYONE;
-			a_flags |= NFS4_ACE_EVERYONE;
-		}
-	} else {
-		if (a_flags & NFS4_ACE_OWNER) {
-			a_flags &= ~NFS4_ACE_OWNER;
-			a_flags |= ACE_OWNER;
-		}
-
-		if (a_flags & NFS4_ACE_GROUP) {
-			a_flags &= ~NFS4_ACE_GROUP;
-			a_flags |= ACE_GROUP;
-		}
-
-		if (a_flags & NFS4_ACE_EVERYONE) {
-			a_flags &= ~NFS4_ACE_EVERYONE;
-			a_flags |= ACE_EVERYONE;
-		}
-	}
-
-	return (a_flags);
 }
 
 static int
@@ -1815,8 +1753,8 @@ __zpl_xattr_nfs4acl_get(struct inode *ip, const char *name,
 		*((u32*)bufp) = htonl(acep->a_type);
 		bufp += sizeof (u32);
 
-		/* ace flags */
-		*((u32*)bufp) = htonl(nfs4_acl_tools_map(acep->a_flags, 1));
+		/* ace flags, reduced to NFSv4 supported set */
+		*((u32*)bufp) = htonl(acep->a_flags & ACE_NFSV4_SUP_FLAGS);
 		bufp += sizeof (u32);
 
 		/* ace access_mask */
@@ -1825,11 +1763,11 @@ __zpl_xattr_nfs4acl_get(struct inode *ip, const char *name,
 
 		switch (acep->a_flags & ACE_TYPE_FLAGS) {
 			case ACE_OWNER:
-				who_str = "owner@";
+				who_str = "OWNER@";
 				break;
 
 			case ACE_GROUP|ACE_IDENTIFIER_GROUP:
-				who_str = "group@";
+				who_str = "GROUP@";
 				break;
 
 			case ACE_IDENTIFIER_GROUP:
@@ -1837,7 +1775,7 @@ __zpl_xattr_nfs4acl_get(struct inode *ip, const char *name,
 				break;
 
 			case ACE_EVERYONE:
-				who_str = "everyone@";
+				who_str = "EVERYONE@";
 				break;
 
 			case 0:
@@ -1897,7 +1835,6 @@ __zpl_xattr_nfs4acl_set(struct inode *ip, const char *name,
 	char *bufp;
 	int used_size, i;
 	int ret = 0;
-
 	/* xattr_resolve_name will do this for us if this is defined */
 #ifndef HAVE_XATTR_HANDLER_NAME
 	if (strcmp(name, "") != 0)
@@ -1916,9 +1853,8 @@ __zpl_xattr_nfs4acl_set(struct inode *ip, const char *name,
 	vsecp.vsa_aclcnt = ntohl(*((u32 *)bufp));
 	bufp += sizeof (u32);
 
-	vsecp.vsa_aclentp = kmem_alloc(vsecp.vsa_aclcnt * sizeof (ace_t),
-	    KM_SLEEP);
 	vsecp.vsa_aclentsz = vsecp.vsa_aclcnt * sizeof (ace_t);
+	vsecp.vsa_aclentp = kmem_alloc(vsecp.vsa_aclentsz, KM_SLEEP);
 
 	for (i = 0; i < vsecp.vsa_aclcnt; i++) {
 		ace_t *acep = vsecp.vsa_aclentp + (i * sizeof (ace_t));
@@ -1926,92 +1862,104 @@ __zpl_xattr_nfs4acl_set(struct inode *ip, const char *name,
 
 		/* ace type */
 		used_size += sizeof (u32);
-		if (used_size > size)
-			return (-EINVAL);
+		if (used_size > size) {
+			ret = -EINVAL;
+			goto nfs4acl_set_out;
+		}
 		acep->a_type = ntohl(*((u32 *)bufp));
 		bufp += sizeof (u32);
 
 		/* ace flags */
 		used_size += sizeof (u32);
-		if (used_size > size)
-			return (-EINVAL);
-
-		acep->a_flags = nfs4_acl_tools_map(ntohl(*((u32 *)bufp)), 0);
+		if (used_size > size) {
+			ret = -EINVAL;
+			goto nfs4acl_set_out;
+		}
+		acep->a_flags = ntohl(*((u32 *)bufp));
 		bufp += sizeof (u32);
+
+		if (acep->a_flags & ~ACE_NFSV4_SUP_FLAGS) {
+			ret = -EINVAL;
+			goto nfs4acl_set_out;
+		}
 
 		/* ace access_mask */
 		used_size += sizeof (u32);
-		if (used_size > size)
-			return (-EINVAL);
+		if (used_size > size) {
+			ret = -EINVAL;
+			goto nfs4acl_set_out;
+		}
 		acep->a_access_mask = ntohl(*((u32 *)bufp));
 		bufp += sizeof (u32);
 
 		/* length of who string */
 		used_size += sizeof (u32);
-		if (used_size > size)
-			return (-EINVAL);
+		if (used_size > size) {
+			ret = -EINVAL;
+			goto nfs4acl_set_out;
+		}
 		who_strlen = ntohl(*((u32 *)bufp));
 		bufp += sizeof (u32);
 
 		used_size += who_strlen;
-		if (used_size > size)
-			return (-EINVAL);
-
-		switch (acep->a_flags & ACE_TYPE_FLAGS) {
-			case ACE_OWNER:
-			case ACE_GROUP|ACE_IDENTIFIER_GROUP:
-			case ACE_EVERYONE:
-				acep->a_who = -1;
-				break;
-
-			case ACE_IDENTIFIER_GROUP:
-			case 0: {
-				long id_long;
-
-				ret = nfs4acl_get_key(bufp, who_strlen,
-				    acep->a_flags & ACE_TYPE_FLAGS ? "gid" :
-				    "uid", NULL, id_str, sizeof (id_str));
-
-				/*
-				 * If we couldn't map the name to a numeric id,
-				 * see if the name is all digits, and if so,
-				 * just use it as the id directly
-				 */
-				if (ret < 0) {
-					int c = 0;
-					while (c < who_strlen && c <
-					    sizeof (id_str)) {
-						if (bufp[c] == '@') {
-							id_str[c] = '\0';
-							ret = 0;
-							break;
-						}
-						if (!isdigit(bufp[c]))
-							break;
-
-						id_str[c] = bufp[c];
-						c++;
-					}
-
-					if (ret < 0 || c == 0) {
-						ret = -EINVAL;
-						goto nfs4acl_set_out;
-					}
-				}
-
-				ret = kstrtol(id_str, 10, &id_long);
-				if (ret < 0)
-					goto nfs4acl_set_out;
-
-				acep->a_who = id_long;
-				break;
-			}
-			default:
-				ret = -EINVAL;
-				goto nfs4acl_set_out;
-				break;
+		if (used_size > size) {
+			ret = -EINVAL;
+			goto nfs4acl_set_out;
 		}
 
+		if (who_strlen == 6 && !memcmp(bufp, "OWNER@", 6)) {
+			acep->a_flags |= ACE_OWNER;
+			acep->a_who = -1;
+		} else if (who_strlen == 6 && !memcmp(bufp, "GROUP@", 6)) {
+			acep->a_flags |= ACE_GROUP;
+			acep->a_who = -1;
+		} else if (who_strlen == 9 && !memcmp(bufp, "EVERYONE@", 9)) {
+			acep->a_flags |= ACE_EVERYONE;
+			acep->a_who = -1;
+		} else if ((acep->a_flags & ACE_TYPE_FLAGS) ==
+		    ACE_IDENTIFIER_GROUP || !(acep->a_flags & ACE_TYPE_FLAGS)) {
+			long id_long;
+
+			ret = nfs4acl_get_key(bufp, who_strlen,
+			    acep->a_flags & ACE_TYPE_FLAGS ? "gid" :
+			    "uid", NULL, id_str, sizeof (id_str));
+
+			/*
+			 * If we couldn't map the name to a numeric id,
+			 * see if the name is all digits, and if so,
+			 * just use it as the id directly
+			 */
+			if (ret < 0) {
+				int c = 0;
+				while (c < who_strlen && c <
+				    sizeof (id_str)) {
+					if (bufp[c] == '@') {
+						id_str[c] = '\0';
+						ret = 0;
+						break;
+					}
+					if (!isdigit(bufp[c]))
+						break;
+
+					id_str[c] = bufp[c];
+					c++;
+				}
+
+				if (ret < 0 || c == 0) {
+					ret = -EINVAL;
+					goto nfs4acl_set_out;
+				}
+			}
+
+			ret = kstrtol(id_str, 10, &id_long);
+			if (ret < 0)
+				goto nfs4acl_set_out;
+
+			acep->a_who = id_long;
+		} else {
+			ret = -EINVAL;
+			goto nfs4acl_set_out;
+		}
 		/* update for xdr padding */
 		who_strlen = ((who_strlen / NFS4ACL_XDR_MOD) * NFS4ACL_XDR_MOD *
 		    sizeof (char)) + (who_strlen % NFS4ACL_XDR_MOD ?
@@ -2026,7 +1974,7 @@ __zpl_xattr_nfs4acl_set(struct inode *ip, const char *name,
 
 nfs4acl_set_out:
 
-	kmem_free(vsecp.vsa_aclentp, vsecp.vsa_aclcnt * sizeof (ace_t));
+	kmem_free(vsecp.vsa_aclentp, vsecp.vsa_aclentsz);
 
 	return (ret);
 }
