@@ -1411,7 +1411,11 @@ _zpl_permission(struct inode *ip, int mask)
 		return (-zfs_access(ip, (mask &
 		    (MAY_READ|MAY_WRITE|MAY_EXEC)) << 6, 0, CRED()));
 	} else {
+#if defined(HAVE_CHECK_ACL)
 		return (generic_permission(ip, mask));
+#else
+		return (generic_permission(ip, mask, __zpl_check_acl));
+#endif
 	}
 }
 
