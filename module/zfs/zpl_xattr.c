@@ -1103,19 +1103,7 @@ zpl_check_acl(struct inode *ip, int mask)
 {
 	return (__zpl_check_acl(ip, mask));
 }
-#elif defined(HAVE_PERMISSION_WITH_NAMEIDATA)
-int
-zpl_permission(struct inode *ip, int mask, struct nameidata *nd)
-{
-	return (generic_permission(ip, mask, __zpl_check_acl));
-}
-#elif defined(HAVE_PERMISSION)
-int
-zpl_permission(struct inode *ip, int mask)
-{
-	return (generic_permission(ip, mask, __zpl_check_acl));
-}
-#endif /* HAVE_CHECK_ACL | HAVE_PERMISSION */
+#endif /* HAVE_CHECK_ACL */
 #endif /* !HAVE_GET_ACL */
 
 int
@@ -1408,6 +1396,40 @@ xattr_handler_t zpl_xattr_acl_default_handler =
 };
 
 #endif /* CONFIG_FS_POSIX_ACL */
+
+#if (defined(CONFIG_FS_POSIX_ACL) && !defined(HAVE_GET_ACL) && \
+	!defined(HAVE_CHECK_ACL)) || defined(ZFS_NFS4_ACL)
+int
+_zpl_permission(struct inode *ip, int mask)
+{
+	if (ITOZSB(ip)->z_acl_type == ZFS_ACLTYPE_NFS4ACL) {
+		/*
+		 * XXX - mask could also include
+		 * MAY_APPEND|MAY_ACCESS|MAY_OPEN|MAY_CHDIR, do we care?
+		 * What about V_APPEND zfs_access flag?
+		 */
+		return (-zfs_access(ip, (mask &
+		    (MAY_READ|MAY_WRITE|MAY_EXEC)) << 6, 0, CRED()));
+	} else {
+		return (generic_permission(ip, mask));
+	}
+}
+
+#if defined(HAVE_PERMISSION_WITH_NAMEIDATA)
+int
+zpl_permission(struct inode *ip, int mask, struct nameidata *nd)
+{
+	return (_zpl_permission(ip, mask));
+}
+#elif defined(HAVE_PERMISSION)
+int
+zpl_permission(struct inode *ip, int mask)
+{
+	return (_zpl_permission(ip, mask));
+}
+#endif /* HAVE_PERMISSION */
+#endif
+/* (CONFIG_FS_POSIX_ACL & !HAVE_GET_ACL & !HAVE_CHECK_ACL) | ZFS_NFS4_ACL */
 
 #ifdef ZFS_NFS4_ACL
 

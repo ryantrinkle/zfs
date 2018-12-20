@@ -732,10 +732,15 @@ const struct inode_operations zpl_inode_operations = {
 	.get_acl	= zpl_get_acl,
 #elif defined(HAVE_CHECK_ACL)
 	.check_acl	= zpl_check_acl,
-#elif defined(HAVE_PERMISSION)
-	.permission	= zpl_permission,
-#endif /* HAVE_GET_ACL | HAVE_CHECK_ACL | HAVE_PERMISSION */
+#endif /* HAVE_GET_ACL | HAVE_CHECK_ACL */
 #endif /* CONFIG_FS_POSIX_ACL */
+#if (defined(CONFIG_FS_POSIX_ACL) && !defined(HAVE_GET_ACL) && \
+	!defined(HAVE_CHECK_ACL)) || defined(ZFS_NFS4_ACL)
+#if defined(HAVE_PERMISSION)
+	.permission	= zpl_permission,
+#endif /* HAVE_PERMISSION */
+#endif
+/* (CONFIG_FS_POSIX_ACL & !HAVE_GET_ACL & !HAVE_CHECK_ACL) | ZFS_NFS4_ACL */
 };
 
 const struct inode_operations zpl_dir_inode_operations = {
@@ -771,10 +776,15 @@ const struct inode_operations zpl_dir_inode_operations = {
 	.get_acl	= zpl_get_acl,
 #elif defined(HAVE_CHECK_ACL)
 	.check_acl	= zpl_check_acl,
-#elif defined(HAVE_PERMISSION)
-	.permission	= zpl_permission,
-#endif /* HAVE_GET_ACL | HAVE_CHECK_ACL | HAVE_PERMISSION */
+#endif /* HAVE_GET_ACL | HAVE_CHECK_ACL */
 #endif /* CONFIG_FS_POSIX_ACL */
+#if (defined(CONFIG_FS_POSIX_ACL) && !defined(HAVE_GET_ACL) && \
+	!defined(HAVE_CHECK_ACL)) || defined(ZFS_NFS4_ACL)
+#if defined(HAVE_PERMISSION)
+	.permission	= zpl_permission,
+#endif /* HAVE_PERMISSION */
+#endif
+/* (CONFIG_FS_POSIX_ACL & !HAVE_GET_ACL & !HAVE_CHECK_ACL) | ZFS_NFS4_ACL */
 };
 
 const struct inode_operations zpl_symlink_inode_operations = {
@@ -816,10 +826,15 @@ const struct inode_operations zpl_special_inode_operations = {
 	.get_acl	= zpl_get_acl,
 #elif defined(HAVE_CHECK_ACL)
 	.check_acl	= zpl_check_acl,
-#elif defined(HAVE_PERMISSION)
-	.permission	= zpl_permission,
-#endif /* HAVE_GET_ACL | HAVE_CHECK_ACL | HAVE_PERMISSION */
+#endif /* HAVE_GET_ACL | HAVE_CHECK_ACL */
 #endif /* CONFIG_FS_POSIX_ACL */
+#if (defined(CONFIG_FS_POSIX_ACL) && !defined(HAVE_GET_ACL) && \
+	!defined(HAVE_CHECK_ACL)) || defined(ZFS_NFS4_ACL)
+#if defined(HAVE_PERMISSION)
+	.permission	= zpl_permission,
+#endif /* HAVE_PERMISSION */
+#endif
+/* (CONFIG_FS_POSIX_ACL & !HAVE_GET_ACL & !HAVE_CHECK_ACL) | ZFS_NFS4_ACL */
 };
 
 dentry_operations_t zpl_dentry_operations = {
