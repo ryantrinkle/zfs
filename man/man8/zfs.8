@@ -1073,6 +1073,38 @@ accordance to the requested mode from the application.
 The
 .Sy aclinherit
 property does not apply to posix ACLs.
+.It Xo
+.Sy aclmode Ns = Ns Sy discard Ns | Ns Sy groupmask Ns | Ns
+.Sy passthrough Ns
+.Xc
+Controls how an
+.Sy ACL
+is modified during
+.Xr chmod 2 .
+.Bl -tag -width "passthrough"
+.It Sy discard
+default, deletes all
+.Sy ACE Ns s
+that do not represent the mode of the file.
+.It Sy groupmask
+reduces permissions granted in all
+.Sy ALLOW
+entries found in the
+.Sy ACL
+such that they are no greater than the group permissions specified by
+.Xr chmod 2 .
+.It Sy passthrough
+indicates that no changes are made to the
+.Sy ACL
+other than creating or updating the necessary
+.Sy ACE Ns s
+to represent the new mode of the file or directory.
+.El
+.Pp
+.Xr chmod 2
+is required to change the set user ID, set group ID, or sticky bits on a file or
+directory, as they do not have equivalent
+.Sy ACE Ns s.
 .It Sy acltype Ns = Ns Sy off Ns | Ns Sy noacl Ns | Ns Sy nfs4acl Ns | Ns Sy posixacl
 Controls whether ACLs are enabled and if so what type of ACL to use.
 .Bl -tag -width "posixacl"
@@ -4123,6 +4155,7 @@ projectobjused   other          Allows reading any projectobjused@... property
 projectused      other          Allows reading any projectused@... property
 
 aclinherit       property
+aclmode          property
 acltype          property
 atime            property
 canmount         property
@@ -4640,6 +4673,7 @@ pool/home/bob  zoned                 off                    default
 pool/home/bob  snapdir               hidden                 default
 pool/home/bob  acltype               off                    default
 pool/home/bob  aclinherit            restricted             default
+pool/home/bob  aclmode               discard                default
 pool/home/bob  canmount              on                     default
 pool/home/bob  xattr                 on                     default
 pool/home/bob  copies                1                      default
