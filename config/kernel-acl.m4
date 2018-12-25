@@ -346,3 +346,22 @@ AC_DEFUN([ZFS_AC_KERNEL_USER_KEY_PAYLOAD], [
 		AC_MSG_RESULT(no)
 	])
 ])
+
+dnl #
+dnl # Check whether key subsystem has generic_key_instantiate
+dnl #
+AC_DEFUN([ZFS_AC_KERNEL_GENERIC_KEY_INSTANTIATE], [
+	AC_MSG_CHECKING([whether generic_key_instantiate() exists])
+	ZFS_LINUX_TRY_COMPILE([
+		#include <linux/key-type.h>
+	],[
+		struct key_type k;
+
+		k.instantiate = generic_key_instantiate;
+	],[
+		AC_MSG_RESULT(yes)
+		AC_DEFINE(HAVE_GENERIC_KEY_INSTANTIATE, 1, [generic_key_instantiate() exists])
+	],[
+		AC_MSG_RESULT(no)
+	])
+])

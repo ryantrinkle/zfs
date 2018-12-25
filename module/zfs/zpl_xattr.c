@@ -1444,6 +1444,7 @@ static const struct cred *nfs4acl_resolver_cred;
 #define	NFS4ACL_UINT_MAXLEN	11
 #define	NFS4ACL_XDR_MOD	4
 
+#if defined(HAVE_GENERIC_KEY_INSTANTIATE)
 static int
 nfs4acl_key_preparse(struct key_preparsed_payload *kpp)
 {
@@ -1467,11 +1468,43 @@ nfs4acl_key_free_preparse(struct key_preparsed_payload *kpp)
 {
 	kfree(kpp->payload.data[0]);
 }
+#else /* HAVE_GENERIC_KEY_INSTANTIATE */
+static int
+nfs4acl_key_instantiate(struct key *k, struct key_preparsed_payload *kpp)
+{
+	struct user_key_payload *ukp;
+	size_t datalen = kpp->datalen;
+	int ret;
+
+	if (!kpp->data || datalen < 1 || datalen > 32767)
+		return (-EINVAL);
+
+	ret = key_payload_reserve(k, datalen);
+	if (ret < 0)
+		return (ret);
+
+	ukp = kmalloc(sizeof (*ukp) + datalen, GFP_KERNEL);
+	if (!ukp)
+		return (-ENOMEM);
+
+	ukp->datalen = datalen;
+	memcpy(ukp->data, kpp->data, datalen);
+	rcu_assign_keypointer(k, ukp);
+
+	return (0);
+}
+
+static int
+nfs4acl_key_match(const struct key *k, const void *desc)
+{
+	return (strcmp(k->description, desc) == 0);
+}
+#endif /* HAVE_GENERIC_KEY_INSTANTIATE */
 
 static void
 nfs4acl_key_destroy(struct key *k)
 {
-	struct user_key_payload *ukp = k->payload.data[0];
+	struct user_key_payload *ukp = k->payload.data;
 
 	kfree(ukp);
 }
@@ -1519,9 +1552,14 @@ nfs4acl_key_read(const struct key *k, char __user *ub, size_t ublen)
 
 static struct key_type key_type_nfs4acl_resolver = {
 	.name		= "zfs_nfs4acl_resolver",
+#if defined(HAVE_GENERIC_KEY_INSTANTIATE)
 	.preparse	= nfs4acl_key_preparse,
 	.free_preparse	= nfs4acl_key_free_preparse,
 	.instantiate	= generic_key_instantiate,
+#else
+	.instantiate	= nfs4acl_key_instantiate,
+	.match		= nfs4acl_key_match,
+#endif
 	.revoke		= user_revoke,
 	.destroy	= nfs4acl_key_destroy,
 	.describe	= nfs4acl_key_describe,
@@ -2088,11 +2126,19 @@ zpl_xattr_init(void)
 	if (!cred)
 		return (-ENOMEM);
 
+#if defined(HAVE_GENERIC_KEY_INSTANTIATE)
 	keyring = keyring_alloc(".zfs_nfs4acl_resolver",
 	    GLOBAL_ROOT_UID, GLOBAL_ROOT_GID, cred,
 	    (KEY_POS_ALL & ~KEY_POS_SETATTR) |
 	    KEY_USR_VIEW | KEY_USR_READ,
 	    KEY_ALLOC_NOT_IN_QUOTA, NULL, NULL);
+#else
+	keyring = keyring_alloc(".zfs_nfs4acl_resolver",
+	    GLOBAL_ROOT_UID, GLOBAL_ROOT_GID, cred,
+	    (KEY_POS_ALL & ~KEY_POS_SETATTR) |
+	    KEY_USR_VIEW | KEY_USR_READ,
+	    KEY_ALLOC_NOT_IN_QUOTA, NULL);
+#endif
 
 	if (IS_ERR(keyring)) {
 		ret = PTR_ERR(keyring);
