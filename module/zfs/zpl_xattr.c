@@ -1504,8 +1504,11 @@ nfs4acl_key_match(const struct key *k, const void *desc)
 static void
 nfs4acl_key_destroy(struct key *k)
 {
+#if defined(HAVE_GENERIC_KEY_INSTANTIATE)
+	struct user_key_payload *ukp = k->payload.data[0];
+#else
 	struct user_key_payload *ukp = k->payload.data;
-
+#endif
 	kfree(ukp);
 }
 
