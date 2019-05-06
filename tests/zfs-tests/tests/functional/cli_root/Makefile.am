@@ -46,6 +46,7 @@ SUBDIRS = \
 	zpool_get \
 	zpool_history \
 	zpool_import \
+	zpool_initialize \
 	zpool_labelclear \
 	zpool_offline \
 	zpool_online \
@@ -58,4 +59,5 @@ SUBDIRS = \
 	zpool_split \
 	zpool_status \
 	zpool_sync \
+	zpool_trim \
 	zpool_upgrade

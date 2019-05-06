@@ -32,6 +32,7 @@ SUBDIRS = \
 	large_files \
 	largest_pool \
 	libzfs \
+	limits \
 	pyzfs \
 	link_count \
 	migration \
@@ -67,6 +68,7 @@ SUBDIRS = \
 	sparse \
 	threadsappend \
 	tmpfile \
+	trim \
 	truncate \
 	upgrade \
 	user_namespace \
